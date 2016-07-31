@@ -114,6 +114,8 @@ Input:
 							for sampled features of all nodes in the same depth
 	treeNodes: TNode*  :  the root node of current tree 
 	sampled_fea_num: int : the number of sampling features used to find splitting pos 
+    curr_childs_num: int: the number of childs nodes in current depth
+    findex:   int       the index of features now splitting
 Output:       
 	bsplit_info: SplitInfo[] : the split information 
 	 
@@ -121,7 +123,7 @@ Return:         NULL
 *************************************************/ 
 inline void find_splits(FPpair *fppairs, int samples_num, int feature_id, int *positions, 
 		float *sqr_y_list, QNode *q, SplitInfo *splits_info,
-		 TNode *treeNodes, int sampled_fea_num, int curr_childs_num)
+		 TNode *treeNodes, int sampled_fea_num, int curr_childs_num, int findex)
 {
 	/* the samples sum value in left child nodes if splitting */
 	float *left_childs_sum = (float*) malloc(sizeof(float) * curr_childs_num);
@@ -159,7 +161,7 @@ inline void find_splits(FPpair *fppairs, int samples_num, int feature_id, int *p
 
         printf("temp Gain is : %f \n", tempGain);
 		
-		SplitInfo &bsplit_info = splits_info[cid * sampled_fea_num +feature_id];
+		SplitInfo &bsplit_info = splits_info[cid * sampled_fea_num +findex];
 		
 		if(tempGain < bsplit_info.err)
 		{
@@ -178,6 +180,7 @@ inline void find_splits(FPpair *fppairs, int samples_num, int feature_id, int *p
 	/* free the memory */
 	free(left_childs_sum);
 	free(left_childs_num);
+    free(left_childs_sqrsum);
 }
 
 
@@ -215,13 +218,14 @@ void update_queue(TNode *tree, int &nodes_num, SplitInfo *best_split_info, QNode
 			child_q_pos_second[i] =  childs_num + 1;
 
 			for (int c = 0; c < 2; c++) {
-				TNode &new_node = tree[nodes_num++];
+				TNode &new_node = tree[nodes_num];
 				new_node.ind = -1;
 				new_node.value =  best_split_info[i].sum_y[c] / best_split_info[i].cnt[c];
 				new_node.sum_y =  best_split_info[i].sum_y[c];
 				new_node.sum_sqr_y =  best_split_info[i].sum_sqr_y[c];
 				float err =  new_node.sum_sqr_y -  new_node.sum_y*new_node.sum_y/best_split_info[i].cnt[c];
 				new_q[childs_num++] =  (QNode(nodes_num, best_split_info[i].cnt[c],  err));
+                nodes_num++;
 				//tree[nodes_num++] = (new_node);                    
 			}                
 		}
@@ -276,11 +280,11 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
 	/* fppairs :storing the samples data by column(features) instead of by row(samples) */
 	FPpair *fppairs = (FPpair*) malloc( sizeof(FPpair) * samples_num * config.max_feature);
 	
-	/* splits_info: storing the splitting informations for all features and all nodes */
+	/* splits_info: storing the splitting informations for all sampling features and all nodes */
 	SplitInfo *splits_info = (SplitInfo *) malloc(sizeof(SplitInfo) * MAX_CHILDS_NUM * sampled_fea_num);
 	
 	/* the best split pos for all nodes in the same depth */
-	SplitInfo *best_split_info = (SplitInfo *) malloc(sizeof(SplitInfo) * MAX_CHILDS_NUM * sampled_fea_num);
+	SplitInfo *best_split_info = (SplitInfo *) malloc(sizeof(SplitInfo) * MAX_CHILDS_NUM);
 
 	/* storing the data by column(features) in fppairs instead of by row(samples) */
 	for (int i = 0; i < samples_num; i++)  
@@ -314,22 +318,22 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
     q[currLevel_childs_num++] = (QNode(0,  samples_num, sum_sqr_y- sum_y*sum_y/samples_num));  
 
 	/* the samples sum value in left child nodes if splitting */
-	float *left_childs_sum = (float*) malloc(sizeof(float) * MAX_CHILDS_NUM);
+	//float *left_childs_sum = (float*) malloc(sizeof(float) * MAX_CHILDS_NUM);
 	/* the samples number in left child nodes if splitting */	
-	int	  *left_childs_num = (int *) malloc(sizeof(int) * MAX_CHILDS_NUM);	
+	//int	  *left_childs_num = (int *) malloc(sizeof(int) * MAX_CHILDS_NUM);	
 	
     /* constructing the tree by breadth-first-search */
 	for (int dep = 0; dep < config.depth;  dep++) {
 		if (currLevel_childs_num == 0)  break; /* stop constructing if no nodes need to split */
 		
-		/* initial the split information */
+		/* initial the split information for all nodes in the same depth */
 		for (int i = 0; i <  currLevel_childs_num; i++) { 
 			best_split_info[i].err =  MAX_ERROR;  
 			best_split_info[i].bind =  -1;             
 			for (int j = 0; j <  sampled_fea_num; j++) {                    
-				splits_info[i*currLevel_childs_num + j].err = MAX_ERROR;
-				splits_info[i*currLevel_childs_num + j].bind = -1;
-				splits_info[i*currLevel_childs_num + j].sum_sqr_y[0] = 0;
+				splits_info[i*sampled_fea_num + j].err = MAX_ERROR;
+				splits_info[i*sampled_fea_num + j].bind = -1;
+				splits_info[i*sampled_fea_num + j].sum_sqr_y[0] = 0;
 			}
 		}
 
@@ -339,7 +343,7 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
 			/* randomly select feature to find split position */
 			int feature_id = (int) rand() % config.max_feature;
 			find_splits( &(fppairs[feature_id * samples_num]), samples_num, feature_id, positions, 
-					sqr_y_list, q, splits_info, treeNodes, sampled_fea_num, currLevel_childs_num);
+                    sqr_y_list, q, splits_info, treeNodes, sampled_fea_num, currLevel_childs_num, findex);
 		}
 
 		/* merge split positions on all features to a best splitting */
