@@ -1,7 +1,7 @@
 /***************************************************************************
 Copyright:
 Author: Peng Baoyun
-Data:   2016-07-30
+Date:   2016-07-30
 Description:Regression Random  Forest implementation on Intel Xeon Phi(MIC).
 ***************************************************************************/
 
@@ -90,6 +90,8 @@ static TNode forestNodes[MAX_NODES_NUM * MAX_TREE_NUM];	/* forest's nodes array 
 static int   treeNodesNum[MAX_NODES_NUM];	/* number of tree's nodes in forest' */
 float 		*dataVec;		/* the samples and features value */
 float		*yVec;			/* the target value of all samples */
+ForestConfig config;        /* the configuration of the forest */
+
 
 
 /* the comparable function for sorting the feature pairs */
@@ -149,34 +151,37 @@ inline void find_splits(FPpair *fppairs, int samples_num, int feature_id, int *p
 		/* the index of node's father node */
 		int pid = q[cid].pid;
 		
-		left_childs_sum[cid] += yVec[sid];
-		left_childs_num[cid]++;
+        if (tinfo.cnt0 >= min_children && q[pos].cnt - tinfo.cnt0 >= min_children && 
+                   sign(fea_list[i].first - tinfo.last_val) != 0) 
+        {
+            left_childs_sum[cid] += yVec[sid];
+            left_childs_num[cid]++;
 
-		/* computing the split gain of current split pos, split_gain = sum^2/N - sum1^2/L - sum2^2/R */
-        float &ss0 = left_childs_sum[cid];
-        float ss1 = treeNodes[pid].sum_y - ss0;
-		
-		float tempGain = treeNodes[pid].sum_sqr_y - (ss0*ss0 / left_childs_num[cid]) - 
-			ss1*ss1 / (q[cid].cnt - left_childs_num[cid]);
+            /* computing the split gain of current split pos, split_gain = sum^2/N - sum1^2/L - sum2^2/R */
+            float &ss0 = left_childs_sum[cid];
+            float ss1 = treeNodes[pid].sum_y - ss0;
+            
+            float tempGain = treeNodes[pid].sum_sqr_y - (ss0*ss0 / left_childs_num[cid]) - 
+                ss1*ss1 / (q[cid].cnt - left_childs_num[cid]);
 
-        printf("temp Gain is : %f \n", tempGain);
-		
-		SplitInfo &bsplit_info = splits_info[cid * sampled_fea_num +findex];
-		
-		if(tempGain < bsplit_info.err)
-		{
-				bsplit_info.err = tempGain;
-				bsplit_info.bind = feature_id;
-				bsplit_info.bsplit = fppairs[feature_id*samples_num + i].val;
-				bsplit_info.cnt[0] = left_childs_num[cid];	
-				bsplit_info.cnt[1] = q[cid].cnt - left_childs_num[cid];
-				bsplit_info.sum_y[0] = ss0;
-				bsplit_info.sum_y[1] = ss1;
-				bsplit_info.sum_sqr_y[0] += square(yVec[sid]);
-				bsplit_info.sum_sqr_y[1] = treeNodes[pid].sum_sqr_y - bsplit_info.sum_sqr_y[0];
-		}
+            printf("temp Gain is : %f \n", tempGain);
+            
+            SplitInfo &bsplit_info = splits_info[cid * sampled_fea_num +findex];
+            
+            if(tempGain < bsplit_info.err)
+            {
+                    bsplit_info.err = tempGain;
+                    bsplit_info.bind = feature_id;
+                    bsplit_info.bsplit = fppairs[feature_id*samples_num + i].val;
+                    bsplit_info.cnt[0] = left_childs_num[cid];	
+                    bsplit_info.cnt[1] = q[cid].cnt - left_childs_num[cid];
+                    bsplit_info.sum_y[0] = ss0;
+                    bsplit_info.sum_y[1] = ss1;
+                    bsplit_info.sum_sqr_y[0] += square(yVec[sid]);
+                    bsplit_info.sum_sqr_y[1] = treeNodes[pid].sum_sqr_y - bsplit_info.sum_sqr_y[0];
+            }
+        }		
 	}
-
 	/* free the memory */
 	free(left_childs_sum);
 	free(left_childs_num);
@@ -200,7 +205,7 @@ Output:
 Return:         NULL
 **********************************************************************/ 
 void update_queue(TNode *tree, int &nodes_num, SplitInfo *best_split_info, QNode *q, 
-		int *positions, int &currLevel_childs_num, int samples_num, ForestConfig &config) {
+		int *positions, int &currLevel_childs_num, int samples_num) {
 	
 	QNode *new_q = (QNode*) malloc(sizeof(QNode) *currLevel_childs_num * 2);
 	//TNode new_node;
@@ -253,14 +258,12 @@ Description:   constructing regression tree
 Input:           
 	samples_ids: int[] : the samples index array used for constructing this tree
 	samples_num: int  :the samples number 
-	config: ForestConfig : the basic information
 Output: 
-	treeNodes: TNode[] : the nodes array in this tree after constructing
+	tree: TNode[] : the nodes array in this tree after constructing
 	nodes_num: int 		: the nodes number in this tree after constructing
 Return:         NULL
 *************************************************/ 
-void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
-		 TNode *treeNodes, int &nodes_num)
+void buildDecisionTree(int *samples_ids, int samples_num, TNode *tree, int &nodes_num)
 {
 	/* the square values of all samples in the same depth */
  	float *sqr_y_list = (float*) malloc(sizeof(float) * config.data_num);	
@@ -272,7 +275,7 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
 	int   *positions  = (int  *) malloc(sizeof(int) * MAX_CHILDS_NUM);		
    
     int   currLevel_childs_num = 0;	/* the nodes number in the sample tree's depth */
-	int   sampled_fea_num = sqrt((float)config.max_feature);		/* features number when splitting at tree's node */
+	int   sampled_fea_num = sqrt((float)config.max_feature);/* features number when splitting at tree's node */
 	
 	/* the nodes needing to splitting in the sample depth */
 	QNode *q = (QNode *) malloc(sizeof(QNode) *  MAX_CHILDS_NUM);
@@ -308,7 +311,7 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
     
 	/* adding the root node in this tree */
 	nodes_num = 0;
-	TNode &node = treeNodes[nodes_num++];
+	TNode &node = tree[nodes_num++];
 	node.ind = -1;	
 	node.value = sum_y / (samples_num ? samples_num : 1);
 	node.sum_y = sum_y;
@@ -343,7 +346,7 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
 			/* randomly select feature to find split position */
 			int feature_id = (int) rand() % config.max_feature;
 			find_splits( &(fppairs[feature_id * samples_num]), samples_num, feature_id, positions, 
-                    sqr_y_list, q, splits_info, treeNodes, sampled_fea_num, currLevel_childs_num, findex);
+                    sqr_y_list, q, splits_info, tree, sampled_fea_num, currLevel_childs_num, findex);
 		}
 
 		/* merge split positions on all features to a best splitting */
@@ -357,8 +360,8 @@ void buildDecisionTree(int *samples_ids, int samples_num, ForestConfig &config,
 			}
 		}
 		/* split nodes to further depth */
-		update_queue(treeNodes, nodes_num, best_split_info, q, positions, 
-				currLevel_childs_num, samples_num, config);
+		update_queue(tree, nodes_num, best_split_info, q, positions, 
+				currLevel_childs_num, samples_num);
 
 	}
 
@@ -381,7 +384,7 @@ Output:
 	regression forest 
 Return:         NULL 
 *************************************************/ 
-void buildForest(float *dataVec, float *yVec, ForestConfig &config)
+void buildForest(float *dataVec, float *yVec)
 {        
 	srand((unsigned)time(NULL));
 	int *samples_ids = (int *)malloc(sizeof(int) * config.data_num);
@@ -390,7 +393,7 @@ void buildForest(float *dataVec, float *yVec, ForestConfig &config)
 		/* randomly sampling the data to construct tree */
 		for(int j = 0; j < config.data_num; j++)
 			samples_ids[j] = (int)rand() % config.data_num;
-		buildDecisionTree(samples_ids, config.data_num, config, &(forestNodes[i*MAX_NODES_NUM]), treeNodesNum[i]);
+		buildDecisionTree(samples_ids, config.data_num, &(forestNodes[i*MAX_NODES_NUM]), treeNodesNum[i]);
 	}
 }
 
@@ -425,14 +428,13 @@ void testData(ForestConfig &config)
 
 int main(int argc, char* argv[])
 {
-	ForestConfig config;
 	//read_conf_file(config, argc, argv);
-
+    /* config is the configuration information */
 	testData(config);
 	
 	double start_time, end_time;
 	
-	buildForest(dataVec, yVec, config);
+	buildForest(dataVec, yVec);
 
 	free(dataVec);
 	free(yVec);
