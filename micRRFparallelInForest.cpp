@@ -8,15 +8,6 @@ Description:Regression Random  Forest implementation on Intel Xeon Phi(MIC).
 construct a tree, and using oob.
 ***************************************************************************/
 
-#include <string>
-#include <string.h>
-#include <fstream>
-#include <iostream>
-#include <math.h>
-#include <algorithm>
-#include <ctime>
-#include <stdio.h>  
-#include <omp.h>
 
 using namespace std;
 
@@ -30,7 +21,17 @@ using namespace std;
 #define MAX_ERROR		100000
 #define EPSI			1e-10
 
-//#pragma offload_attribute(push,target(mic))
+#pragma offload_attribute(push,target(mic))
+
+#include <algorithm>
+#include <string>
+#include <string.h>
+#include <fstream>
+#include <iostream>
+#include <math.h>
+#include <ctime>
+#include <stdio.h>  
+#include <omp.h>
 
 /* configuration information for constructing forest */
 typedef struct {   
@@ -69,6 +70,19 @@ randomly generated an non-repeated elements array of int
 	Output:
 		the address of array.
 ***********************************************************************/
+/* the pair data structure, for storing the data by column(features) instead of by row(samples) */
+struct FPpair{
+	float val;	/* the feature's value */
+	int   pos;	/* the feature's position */
+} ;
+
+/* the comparable function for sorting the feature pairs */
+static inline bool smaller(const FPpair &a, const FPpair &b)
+{
+	return a.val < b.val;
+}
+
+
 int* randomDatas(int minValue, int maxValue, int number)
 {
 	if(number < 1 || (maxValue - minValue < number)) 
@@ -103,11 +117,7 @@ int* randomDatas(int minValue, int maxValue, int number)
 class DecisionTree
 {
 private:
-	/* the pair data structure, for storing the data by column(features) instead of by row(samples) */
-	struct FPpair{
-		float val;	/* the feature's value */
-		int   pos;	/* the feature's position */
-	} ;
+	
 
 	/* the splitting basic information */
 	struct  SplitInfo{
@@ -383,7 +393,7 @@ public:
 
 		/* sorting the features value by ascending */
 		for (int i = 0; i < config.max_feature; i++)
-			sort((fppairs + i*samples_num), (fppairs + (i+1) * samples_num), mySmaller);           
+			sort((fppairs + i*samples_num), (fppairs + (i+1) * samples_num), smaller);           
 		
 		/* adding the root node in this tree */
 		TNode &node = tree[nodes_num++];
@@ -457,6 +467,8 @@ public:
 	{      
 		srand((unsigned)time(NULL));
 		
+		omp_set_num_threads(config.nthread);
+
 		#pragma omp parallel for schedule(static)
 		for (int i = 0; i < config.tree_num; i++)
 		{
@@ -472,18 +484,20 @@ public:
 	}
 };
 
+#pragma offload_attribute(pop)
+
 /********************************************************************
 test function, get the test samples
 *********************************************************************/
 void testData(ForestConfig &config)
 {
-	config.data_num = 100000;	 /* samples number. */
-	config.max_feature = 64; /* sample's features number */
-	config.tree_num = 4;	 /* trees number in forest */
+	config.data_num = 1000000;	 /* samples number. */
+	config.max_feature = 400; /* sample's features number */
+	config.tree_num = 500;	 /* trees number in forest */
 	config.depth = 12;		 /* maximum depth in trees */
 	config.min_children = 1;/* minimum samples number in leaf nodes */
 	config.bootstrap = -0.1; /* sampling ratio for samples */
-	config.nthread = 1;	 /* maximum parallel threads number */
+	config.nthread = 56;	 /* maximum parallel threads number */
 
 	dataVec = (float*) malloc(sizeof(float ) * config.data_num * config.max_feature);
 	yVec = (float *) malloc(sizeof( float) * config.data_num);
@@ -497,7 +511,6 @@ void testData(ForestConfig &config)
 			dataVec[i*config.max_feature + j] = i + 1.0f;
 		}
 	}
-
 }
 
 int main(int argc, char* argv[])
@@ -508,8 +521,16 @@ int main(int argc, char* argv[])
 	
 	double start_time, end_time;
 	
-	Forest forest;
-	forest.buildForest(dataVec, yVec, config);
+    #pragma offload target(mic : 0)\
+    in(dataVec:length(config.data_num*config.max_feature) alloc_if(1))\
+    in(yVec:length(config.data_num) alloc_if(1))
+    {
+		start_time = time(NULL);
+        Forest forest;
+	    forest.buildForest(dataVec, yVec, config);
+		end_time = time(NULL);
+    }
+	
 
 	free(dataVec);
 	free(yVec);
