@@ -21,7 +21,7 @@ using namespace std;
 #define MAX_ERROR		100000
 #define EPSI			1e-10
 
-#pragma offload_attribute(push,target(mic))
+//#pragma offload_attribute(push,target(mic))
 
 #include <algorithm>
 #include <string>
@@ -472,7 +472,6 @@ public:
 		#pragma omp parallel for schedule(static)
 		for (int i = 0; i < config.tree_num; i++)
 		{
-			printf("start to construct tree: %d\n", i);
 			int *samples_ids = (int *)malloc(sizeof(int) * config.data_num);
 			DecisionTree dtree;
 			/* randomly sampling the data to construct tree */
@@ -485,7 +484,7 @@ public:
 	}
 };
 
-#pragma offload_attribute(pop)
+//#pragma offload_attribute(pop)
 
 /********************************************************************
 test function, get the test samples
@@ -494,11 +493,11 @@ void testData(ForestConfig &config)
 {
 	config.data_num = 100000;	 /* samples number. */
 	config.max_feature = 64; /* sample's features number */
-	config.tree_num = 100;	 /* trees number in forest */
-	config.depth = 15;		 /* maximum depth in trees */
+	config.tree_num = 200;	 /* trees number in forest */
+	config.depth = 12;		 /* maximum depth in trees */
 	config.min_children = 1;/* minimum samples number in leaf nodes */
 	config.bootstrap = -0.1; /* sampling ratio for samples */
-	config.nthread = 56;	 /* maximum parallel threads number */
+	config.nthread = 4;	 /* maximum parallel threads number */
 
 	dataVec = (float*) malloc(sizeof(float ) * config.data_num * config.max_feature);
 	yVec = (float *) malloc(sizeof( float) * config.data_num);
@@ -521,17 +520,12 @@ int main(int argc, char* argv[])
 	testData(config);
 	
 	double start_time, end_time;
-	
-    #pragma offload target(mic : 0)\
-    in(dataVec:length(config.data_num*config.max_feature) alloc_if(1))\
-    in(yVec:length(config.data_num) alloc_if(1))
-    {
-		start_time = time(NULL);
-        Forest forest;
-	    forest.buildForest(dataVec, yVec, config);
-		end_time = time(NULL);
-    }
-	
+
+    start_time = time(NULL);
+    Forest forest;
+    forest.buildForest(dataVec, yVec, config);
+    end_time = time(NULL);
+
 
 	free(dataVec);
 	free(yVec);
