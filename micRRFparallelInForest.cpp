@@ -261,12 +261,13 @@ public:
 			int cid = positions[currFeaturesPair[i].pos];
 			/* the index of node's father node */
 			int pid = q[cid].pid;
+			left_childs_sum[cid] += yVec[sid];
+			left_childs_num[cid]++;
 			
 			if (left_childs_num[cid] >= config.min_children && q[cid].cnt - left_childs_num[cid] >= config.min_children && 
 					sign(currFeaturesPair[i].val - splits_info[cid * sampled_fea_num +findex].last_val) != 0) 
 			{
-				left_childs_sum[cid] += yVec[sid];
-				left_childs_num[cid]++;
+
 
 				/* computing the split gain of current split pos, split_gain = sum^2/N - sum1^2/L - sum2^2/R */
 				float &ss0 = left_childs_sum[cid];
@@ -291,8 +292,9 @@ public:
 						bsplit_info.sum_sqr_y[0] += square(yVec[sid]);
 						bsplit_info.sum_sqr_y[1] = tree[pid].sum_sqr_y - bsplit_info.sum_sqr_y[0];
 				}
-				splits_info[cid * sampled_fea_num +findex].last_val = currFeaturesPair[i].val;
+				
 			}		
+			splits_info[cid * sampled_fea_num +findex].last_val = currFeaturesPair[i].val;
 		}
 
 	}
