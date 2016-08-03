@@ -17,7 +17,7 @@ using namespace std;
 #define MAX_CHILDS_NUM 	512
 #define MAX_NODES_NUM  	1024
 #define MAX_TREE_NUM 	200
-#define MAX_ERROR		100000
+#define MAX_ERROR		10000000
 #define EPSI			1e-10
 
 #pragma offload_attribute(push,target(mic))
@@ -266,11 +266,13 @@ public:
 			/* the index of node's father node */
 			int pid = q[cid].pid;
 			
+			left_childs_sum[cid] += yVec[sid];
+			left_childs_num[cid]++;
+
 			if (left_childs_num[cid] >= config.min_children && q[cid].cnt - left_childs_num[cid] >= config.min_children && 
 					sign(currFeaturesPair[i].val - splits_info[cid * sampled_fea_num +findex].last_val) != 0) 
 			{
-				left_childs_sum[cid] += yVec[sid];
-				left_childs_num[cid]++;
+
 
 				/* computing the split gain of current split pos, split_gain = sum^2/N - sum1^2/L - sum2^2/R */
 				float &ss0 = left_childs_sum[cid];
@@ -295,8 +297,8 @@ public:
 						bsplit_info.sum_sqr_y[0] += square(yVec[sid]);
 						bsplit_info.sum_sqr_y[1] = tree[pid].sum_sqr_y - bsplit_info.sum_sqr_y[0];
 				}
-				splits_info[cid * sampled_fea_num +findex].last_val = currFeaturesPair[i].val;
-			}		
+			}
+			splits_info[cid * sampled_fea_num +findex].last_val = currFeaturesPair[i].val;
 		}
 
 	}
@@ -555,7 +557,7 @@ void testData(ForestConfig &config)
 		yVec[i] = i + 1.0f;
 		for(int j=0; j<config.max_feature; j++)
 		{
-			dataVec[i*config.max_feature + j] = i + 1.0f;
+			dataVec[i*config.max_feature + j] = (float)(rand() % 1000);
 		}
 	}
 }
